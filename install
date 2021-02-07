@@ -1,0 +1,127 @@
+#!/bin/bash
+
+function error {
+  echo -e "\e[91m$1\e[39m"
+  exit 1
+}
+
+DIRECTORY="$(readlink -f "$(dirname "$0")")"
+
+if ! command -v yad >/dev/null;then
+  echo -n "YAD is required but not installed. Install now? [Y/n] "
+  read answer
+  if [ "$answer" == n ];then
+    error "User declined."
+  fi
+  if [ -f /usr/bin/apt ];then
+    sudo apt update
+    sudo apt install -y yad
+  elif [ -f /usr/bin/pacman ];then
+    sudo pacman -S yad
+  else
+    error "Failed to find any package manager"
+  fi
+fi
+
+#remove annoying YAD icon browser launcher
+sudo rm -f /usr/share/applications/yad-icon-browser.desktop
+
+echo "Creating menu button..."
+mkdir -p ~/.local/share/applications
+echo "[Desktop Entry]
+Name=Pi Apps
+Comment=Raspberry Pi App Store for open source projects
+Exec=${DIRECTORY}/gui
+Icon=${DIRECTORY}/icons/logo.png
+Terminal=false
+Type=Application
+Categories=Utility;" > ~/.local/share/applications/pi-apps.desktop
+
+echo "Adding Desktop shortcut..."
+cp -f ~/.local/share/applications/pi-apps.desktop ~/Desktop/pi-apps.desktop
+chmod +x ~/Desktop/pi-apps.desktop
+
+echo "Creating Settings menu button..."
+echo "[Desktop Entry]
+Name=Pi Apps Settings
+Comment=Configure Pi-Apps or create an App
+Exec=${DIRECTORY}/settings
+Icon=${DIRECTORY}/icons/logo.png
+Terminal=false
+Type=Application
+Categories=Settings;" > ~/.local/share/applications/pi-apps-settings.desktop
+
+echo "Creating autostarted updater..."
+mkdir -p ~/.config/autostart
+echo "[Desktop Entry]
+Name=Pi Apps Updater
+Exec=${DIRECTORY}/updater onboot
+Icon=${DIRECTORY}/icons/logo.png
+Terminal=false
+Type=Application
+X-GNOME-Autostart-enabled=true
+Hidden=false
+NoDisplay=false" > ~/.config/autostart/pi-apps-updater.desktop
+
+#Ask user if the want to enable one-click run for and executable file
+echo "Do you want to enable one-click-run?"
+echo "Warning: Enabling this feature will allow any executable file to run"
+echo "just by clicking it! Meaning if a file has the command to delete your"
+echo "entire home folder it will delete it when you click on it by accident!"
+echo "Please make sure you know you are doing! y/n"
+read answer
+if [ "$answer" == n ];then
+  echo "$(sed '22 s/quick_exec=1/quick_exec=0/g' ~/.config/libfm/libfm.conf)" > ~/.config/libfm/libfm.conf
+  echo "Continuing normal install..."
+else
+  echo "$(sed '22 s/quick_exec=0/quick_exec=1/g' ~/.config/libfm/libfm.conf)" > ~/.config/libfm/libfm.conf
+  echo "Enabled click-to-run."
+fi
+
+mkdir -p "${DIRECTORY}/data"
+cd "${DIRECTORY}/data"
+mkdir -p installed-packages preload settings status update-status categories
+cd $HOME
+
+#hide template file by default
+"${DIRECTORY}/etc/categoryedit" "template" 'hidden'
+
+#hide duplicates if running in twisteros
+if [ -f /usr/local/bin/twistver ];then
+  PREIFS="$IFS"
+  IFS=$'\n'
+  apps="BalenaEtcher
+Chromium Media Edition
+CommanderPi
+Box86
+Discord
+piKiss
+Retropie
+Scrcpy
+Steam
+Windows 10 Theme
+Chromium Widevine
+Back to Chromium v78
+Lightpad"
+  for app in $apps ;do
+    "${DIRECTORY}/etc/categoryedit" "$app" 'hidden'
+  done
+  echo "Finished hiding apps on TwisterOS."
+fi
+
+#pi-apps terminal command
+if [ ! -f /usr/local/bin/pi-apps ] || ! grep -q /usr/local/bin/pi-apps "${DIRECTORY}/gui";then
+  rm /usr/local/bin/pi-apps
+  echo "#!/bin/bash
+${DIRECTORY}/gui" | sudo tee /usr/local/bin/pi-apps >/dev/null
+  sudo chmod +x /usr/local/bin/pi-apps
+  echo "You can now run pi-apps in a terminal, just by running 'pi-apps'"
+fi
+
+echo "Creating settings if they don"\'"t exist..."
+"${DIRECTORY}/settings" refresh
+
+echo "Preloading app list..."
+"${DIRECTORY}/preload" &>/dev/null
+
+echo "Installation complete."
